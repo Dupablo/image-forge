@@ -1,0 +1,37 @@
+import type { Project } from "./types";
+
+const STORAGE_KEY = "image-forge-projects";
+
+export function loadProjects(): Project[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const data = localStorage.getItem(STORAGE_KEY);
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveProjects(projects: Project[]): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+}
+
+export function getProject(id: string): Project | null {
+  return loadProjects().find((p) => p.id === id) ?? null;
+}
+
+export function saveProject(project: Project): void {
+  const projects = loadProjects();
+  const idx = projects.findIndex((p) => p.id === project.id);
+  if (idx >= 0) {
+    projects[idx] = project;
+  } else {
+    projects.push(project);
+  }
+  saveProjects(projects);
+}
+
+export function deleteProjectFromStorage(id: string): void {
+  saveProjects(loadProjects().filter((p) => p.id !== id));
+}
