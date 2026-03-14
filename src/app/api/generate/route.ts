@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
 
     // For OpenAI, embed negative prompt into the main prompt
     const effectivePrompt =
-      providerName === "openai"
+      providerName === "openai" || providerName === "gemini"
         ? buildOpenAIPrompt(finalPrompt, finalNegativePrompt)
         : finalPrompt;
 
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     const result = await provider.generateImage({
       prompt: effectivePrompt,
       negativePrompt:
-        providerName === "openai" ? undefined : finalNegativePrompt,
+        providerName === "openai" || providerName === "gemini" ? undefined : finalNegativePrompt,
       width: width || 1024,
       height: height || 1024,
       guidanceScale,

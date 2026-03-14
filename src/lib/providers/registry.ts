@@ -1,6 +1,7 @@
 import { OpenAIProvider } from "./openai";
 import { ReplicateProvider } from "./replicate";
 import { StabilityProvider } from "./stability";
+import { GeminiProvider } from "./gemini";
 import type { ImageProvider, ProviderCapabilities } from "./types";
 
 const providerFactories: Record<string, () => ImageProvider | null> = {
@@ -15,6 +16,10 @@ const providerFactories: Record<string, () => ImageProvider | null> = {
   stability: () =>
     process.env.STABILITY_API_KEY
       ? new StabilityProvider(process.env.STABILITY_API_KEY)
+      : null,
+  gemini: () =>
+    process.env.GOOGLE_API_KEY
+      ? new GeminiProvider(process.env.GOOGLE_API_KEY)
       : null,
 };
 
@@ -66,6 +71,7 @@ export function listProviders(): Array<{
         openai: () => new OpenAIProvider(""),
         replicate: () => new ReplicateProvider(""),
         stability: () => new StabilityProvider(""),
+        gemini: () => new GeminiProvider(""),
       };
       const temp = tempFactories[name]();
       capabilities = temp.getCapabilities();
