@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { Download, GitCompare, Paintbrush } from "lucide-react";
+import { Download, GitCompare, Paintbrush, ImageUp, X } from "lucide-react";
 import { AppHeader } from "@/components/layout/app-header";
 import { WorkspaceLayout } from "@/components/layout/workspace-layout";
 import { VersionSidebar } from "@/components/sidebar/version-sidebar";
@@ -23,6 +23,7 @@ import { LockElements } from "@/components/controls/lock-elements";
 import { VariationCount } from "@/components/controls/variation-count";
 import { DownloadDialog } from "@/components/dialogs/download-dialog";
 import { CompareDialog } from "@/components/dialogs/compare-dialog";
+import { ReferenceUpload } from "@/components/dialogs/reference-upload";
 import { useProject } from "@/hooks/use-project";
 import { useGeneration } from "@/hooks/use-generation";
 import { DEFAULT_PARAMS, STYLE_PRESETS } from "@/lib/constants";
@@ -62,6 +63,12 @@ export default function WorkspacePage() {
   const [maskMode, setMaskMode] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [referenceUploadOpen, setReferenceUploadOpen] = useState(false);
+  const [referenceImage, setReferenceImage] = useState<{
+    file: File;
+    url: string;
+    base64: string;
+  } | null>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
 
   // Load providers on mount
@@ -119,23 +126,57 @@ export default function WorkspacePage() {
     return STYLE_PRESETS.find((s) => s.id === genParams.style);
   }, [genParams.style]);
 
+  const handleReferenceUpload = useCallback(async (file: File) => {
+    const url = URL.createObjectURL(file);
+    const base64 = await blobToBase64(file);
+    setReferenceImage({ file, url, base64 });
+  }, []);
+
+  const clearReferenceImage = useCallback(() => {
+    if (referenceImage) {
+      URL.revokeObjectURL(referenceImage.url);
+      setReferenceImage(null);
+    }
+  }, [referenceImage]);
+
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() || !project) return;
     try {
-      const result = await generate({
-        prompt: enhancedPrompt || prompt,
-        negativePrompt: genParams.negativePrompt,
-        width: genParams.width,
-        height: genParams.height,
-        guidanceScale: genParams.guidanceScale,
-        numInferenceSteps: genParams.numInferenceSteps,
-        seed: genParams.seed,
-        style: genParams.style,
-        realismBoost: genParams.realismBoost,
-        numVariations: genParams.numVariations,
-        provider: genParams.provider,
-        model: genParams.model,
-      });
+      let result;
+
+      if (referenceImage) {
+        // Image-to-image: use the uploaded reference image
+        result = await edit({
+          sourceImageBase64: referenceImage.base64,
+          instruction: enhancedPrompt || prompt,
+          prompt: enhancedPrompt || prompt,
+          negativePrompt: genParams.negativePrompt,
+          width: genParams.width,
+          height: genParams.height,
+          strength: genParams.strength,
+          lockElements: genParams.lockElements,
+          style: genParams.style,
+          realismBoost: genParams.realismBoost,
+          provider: genParams.provider,
+          model: genParams.model,
+        });
+      } else {
+        // Text-to-image: generate from scratch
+        result = await generate({
+          prompt: enhancedPrompt || prompt,
+          negativePrompt: genParams.negativePrompt,
+          width: genParams.width,
+          height: genParams.height,
+          guidanceScale: genParams.guidanceScale,
+          numInferenceSteps: genParams.numInferenceSteps,
+          seed: genParams.seed,
+          style: genParams.style,
+          realismBoost: genParams.realismBoost,
+          numVariations: genParams.numVariations,
+          provider: genParams.provider,
+          model: genParams.model,
+        });
+      }
 
       if (result.images.length > 0) {
         const img = result.images[0];
@@ -155,12 +196,13 @@ export default function WorkspacePage() {
             seed: result.seed,
             durationMs: result.durationMs,
             finalNegativePrompt: result.finalNegativePrompt,
-            imageId: "", // Will be set by addVersion
+            imageId: "",
           },
           blob,
           thumbnail
         );
         setEnhancedPrompt(undefined);
+        clearReferenceImage();
       }
     } catch {
       // Error is handled by useGeneration
@@ -171,8 +213,11 @@ export default function WorkspacePage() {
     genParams,
     project,
     activeVersion,
+    referenceImage,
     generate,
+    edit,
     addVersion,
+    clearReferenceImage,
   ]);
 
   const handleEdit = useCallback(
@@ -379,8 +424,32 @@ export default function WorkspacePage() {
                   />
                 )}
               </>
+            ) : referenceImage ? (
+              <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
+                <div className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={referenceImage.url}
+                    alt="Reference image"
+                    className="max-h-[60vh] max-w-full rounded-lg border shadow-sm object-contain"
+                  />
+                  <button
+                    onClick={clearReferenceImage}
+                    className="absolute -top-2 -right-2 rounded-full border bg-background p-1 shadow-sm hover:bg-accent transition-colors"
+                    title="Remove reference image"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Reference image loaded — type a prompt and click Generate to create a new image based on this
+                </p>
+              </div>
             ) : (
-              <ImagePlaceholder onSamplePrompt={setPrompt} />
+              <ImagePlaceholder
+                onSamplePrompt={setPrompt}
+                onUploadImage={() => setReferenceUploadOpen(true)}
+              />
             )}
             <LoadingOverlay status={status} onCancel={cancel} />
             <ErrorBanner error={error} onDismiss={clearError} />
@@ -395,6 +464,43 @@ export default function WorkspacePage() {
                 onSelectProvider={(p) => handleParamsChange({ provider: p })}
               />
             )}
+
+            {/* Reference image upload */}
+            <div className="space-y-2">
+              {referenceImage ? (
+                <div className="flex items-center gap-2 rounded-md border bg-muted/50 p-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={referenceImage.url}
+                    alt="Reference"
+                    className="h-10 w-10 rounded object-cover"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium truncate">
+                      {referenceImage.file.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Image-to-image mode
+                    </p>
+                  </div>
+                  <button
+                    onClick={clearReferenceImage}
+                    className="rounded-md p-1 hover:bg-accent transition-colors"
+                    title="Remove reference"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setReferenceUploadOpen(true)}
+                  className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed py-2 text-sm text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-colors"
+                >
+                  <ImageUp className="h-4 w-4" />
+                  Upload reference image
+                </button>
+              )}
+            </div>
 
             <PromptInput
               value={prompt}
@@ -424,7 +530,7 @@ export default function WorkspacePage() {
             <SettingsPanel
               params={genParams}
               onParamsChange={handleParamsChange}
-              showStrength={!!activeVersion}
+              showStrength={!!activeVersion || !!referenceImage}
             />
 
             <NegativePrompt
@@ -472,6 +578,11 @@ export default function WorkspacePage() {
         onOpenChange={setCompareOpen}
         versions={project.versions}
         loadImage={loadVersionImage}
+      />
+      <ReferenceUpload
+        open={referenceUploadOpen}
+        onOpenChange={setReferenceUploadOpen}
+        onUpload={handleReferenceUpload}
       />
     </div>
   );
